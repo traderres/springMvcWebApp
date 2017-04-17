@@ -1,6 +1,7 @@
 package app1.controllers;
 
 import com.google.gson.Gson;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -11,6 +12,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.rowset.SqlRowSet;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.servlet.ModelAndView;
@@ -19,6 +21,7 @@ import app1.model.UserInfo;
 import javax.annotation.Resource;
 import javax.sql.DataSource;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Properties;
 
 
@@ -225,6 +228,7 @@ public class WelcomeController
     }
 
 
+
     /***************************************************************************
      * getFormattedMessageFromException()
      *
@@ -347,5 +351,86 @@ public class WelcomeController
         }
     }
 
+
+    /***************************************************************************
+     * getUserListOrderedByWithIds()
+     *  1) Run a sql call to get all userinfo from the database
+     *  2) Loop through the results, creating UserInfo objects
+     *
+     *  Returns a list of UserInfo objects
+     ****************************************************************************/
+    private ArrayList<UserInfo> getUserListOrderedByWithIds(List<Integer> aIds, String aOrderBy) throws Exception
+    {
+        ArrayList<UserInfo> users = new ArrayList<UserInfo>();
+
+        String csvOfIds = StringUtils.join(aIds, ",");
+
+        // Construct the SQL call
+        final String sSql = "select name " +
+                            "from users " +
+                            "where id IN (" + csvOfIds + ") " +
+                            "order by " + aOrderBy;
+
+        JdbcTemplate jt = new JdbcTemplate(this.postgresDataSource);
+
+
+        // Get a connection from the JDBC pool, run the query, return the connection to the pool
+        SqlRowSet rs = jt.queryForRowSet(sSql);
+
+        while (rs.next())
+        {
+            // Get the name from the read-only recordset
+            String sUserName = rs.getString("name");
+
+            // Construct a new userInfo object and popuplate it with data from the database
+            UserInfo userInfo = new UserInfo();
+            userInfo.setUserName(sUserName);
+            userInfo.setIsAdministrator(false);
+
+            users.add(userInfo);
+        }
+
+        return users;
+    }
+
+
+
+
+    /***************************************************************************
+     * getDetailsForMultipleIds()
+     ****************************************************************************/
+    @RequestMapping(value="/rest/many/{ids}", method = RequestMethod.GET, produces = "application/json")
+    public ResponseEntity<?> getDetailsForMultipleIds(@PathVariable("ids") List<Integer> aIds)
+    {
+        logger.debug("getDetailsForMultipleIds() started.  aIds={}", aIds);
+
+        try
+        {
+            // Run a SQL call to get the list of users
+            ArrayList<UserInfo> users = getUserListOrderedByWithIds(aIds, "name");
+
+            // Convert the list of Users into a JSON string
+            Gson gson = new Gson();
+            String sJson = gson.toJson(users);
+
+            // Return respnose code of 200 and the JSON string
+            return new ResponseEntity<String>(sJson, HttpStatus.OK);
+        }
+        catch (Exception e)
+        {
+            // Tell the AJAX call that this call failed
+            logger.error("Error occurred making rest call to /rest/many/", e);
+
+            // Get a formatted error message from the exception object
+            String sMessage = getFormattedMessageFromException(e);
+
+            // Tell the AJAX caller that this will be plain text being returned (and not JSON)
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.TEXT_PLAIN);
+
+            // Return the error back to the caller
+            return new ResponseEntity<String>(sMessage, headers, HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
 
 }
